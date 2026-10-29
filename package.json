@@ -1,0 +1,28 @@
+{
+  "name": "dj-strands-harness",
+  "version": "1.0.0",
+  "description": "🎧 DJ Agent con Spotify, construido con Strands Harness + Amazon Nova Pro (JSConf MX)",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22.23.4"
+  },
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "web": "astro dev --root web",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@astrojs/node": "11.1.9",
+    "@strands-agents/harness": "0.3.1",
+    "@strands-agents/sdk": "1.22.0",
+    "astro": "7.4.4",
+    "dotenv": "16.6.1",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1",
+    "tsx": "4.23.13",
+    "typescript": "5.9.3"
+  }
+}

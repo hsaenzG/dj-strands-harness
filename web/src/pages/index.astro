@@ -1,0 +1,1407 @@
+---
+import Layout from "../layouts/Layout.astro";
+import { BIBLIOTECA } from "../../../src/tools/biblioteca.js";
+import { MODELO } from "../../../src/dj.js";
+
+// "bedrock/us.amazon.nova-pro-v1:0" → "Amazon Nova Pro"
+const id = MODELO.split("/").pop() ?? MODELO;
+const nova = id.match(/nova-(\w+)/);
+const modelo = nova ? `Nova ${nova[1][0].toUpperCase()}${nova[1].slice(1)}` : id;
+
+const generos: Record<string, number> = {};
+const moods: Record<string, number> = {};
+for (const c of BIBLIOTECA) {
+  generos[c.genero] = (generos[c.genero] || 0) + 1;
+  moods[c.mood] = (moods[c.mood] || 0) + 1;
+}
+const generosOrdenados = Object.entries(generos).sort((a, b) => b[1] - a[1]);
+const moodsOrdenados = Object.entries(moods).sort((a, b) => b[1] - a[1]);
+---
+
+<Layout title="🎸 DJ Agent">
+  <div class="page">
+    <!-- ─── Sidebar ─── -->
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-logo">🎸</span>
+        <div>
+          <h2 class="brand-name">DJ Agent</h2>
+          <p class="brand-sub">con Strands Harness</p>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h4 class="panel-title">Estado</h4>
+        <div class="status-row"><span class="dot dot-on"></span> Agente local · harness</div>
+        <div class="status-row"><span class="dot dot-cloud"></span> {modelo} · en la nube</div>
+        <div class="status-row"><span class="dot dot-lib"></span> Biblioteca · {BIBLIOTECA.length} tracks</div>
+        <div class="status-row" id="spotify-status"><span class="dot dot-idle" id="spotify-dot"></span> <span id="spotify-label">Spotify · conectando…</span></div>
+        <a id="spotify-connect" class="connect-btn hidden" href="/api/spotify/login">🔗 Conectar mi Spotify</a>
+      </div>
+
+      <div class="panel">
+        <h4 class="panel-title">Memoria</h4>
+        <div class="mem-row">
+          <span class="mem-kind">Corto plazo</span>
+          <span class="mem-value">sesión <code id="mem-sesion">…</code> · <span id="mem-turnos">0</span> mensajes</span>
+        </div>
+        <div class="mem-row">
+          <span class="mem-kind">Largo plazo</span>
+          <span class="mem-value"><span id="mem-total">0</span> recuerdos en <code>.agent/memory</code></span>
+        </div>
+        <ul id="mem-list" class="mem-list"></ul>
+        <button id="new-session" class="clear-btn">✨ Nueva sesión</button>
+      </div>
+
+      <div class="panel">
+        <h4 class="panel-title">Tu biblioteca</h4>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <span class="stat-value">{generosOrdenados.length}</span>
+            <span class="stat-label">Géneros</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-value">{moodsOrdenados.length}</span>
+            <span class="stat-label">Moods</span>
+          </div>
+        </div>
+        <details class="expander">
+          <summary>🎵 Géneros</summary>
+          <div class="expander-body">
+            {generosOrdenados.map(([g, count]) => (
+              <div class="bar-line">
+                <span class="bar-label">{g}</span>
+                <span class="bar-track"><span class="bar-fill" style={`width:${Math.min(100, count * 20)}%`}></span></span>
+                <span class="bar-count">{count}</span>
+              </div>
+            ))}
+          </div>
+        </details>
+        <details class="expander">
+          <summary>🌊 Moods</summary>
+          <div class="expander-body">
+            {moodsOrdenados.map(([m, count]) => (
+              <div class="bar-line">
+                <span class="bar-label">{m}</span>
+                <span class="bar-track"><span class="bar-fill" style={`width:${Math.min(100, count * 20)}%`}></span></span>
+                <span class="bar-count">{count}</span>
+              </div>
+            ))}
+          </div>
+        </details>
+      </div>
+
+      <div class="panel">
+        <h4 class="panel-title">Atajos</h4>
+        <div class="quick-prompts">
+          <button class="quick-btn" data-prompt="Ponme algo de rock para programar">🎸 Rock para programar</button>
+          <button class="quick-btn" data-prompt="Arma una playlist de fiesta de 1 hora">🎉 Playlist de fiesta 1h</button>
+          <button class="quick-btn" data-prompt="Algo chill para la noche">🌙 Chill para la noche</button>
+          <button class="quick-btn" data-prompt="Estoy melancólico, ¿qué me pones?">😢 Estoy melancólico</button>
+          <button class="quick-btn" data-prompt="¿Qué sabes de mis gustos musicales?">🧠 ¿Qué recuerdas de mí?</button>
+        </div>
+      </div>
+
+      <div class="sidebar-footer">strands harness · amazon nova · astro</div>
+    </aside>
+
+    <!-- ─── Main ─── -->
+    <main class="main">
+      <header class="topbar">
+        <h1 class="title">🎸 DJ Agent</h1>
+        <p class="title-sub">Tu DJ personal: el agente corre en tu laptop, el modelo en Amazon Bedrock</p>
+      </header>
+
+      <div id="chat" class="chat">
+        <div id="welcome" class="welcome">
+          <span class="welcome-emoji">🎧</span>
+          <h3>¿Qué escuchamos hoy?</h3>
+          <ul class="welcome-list">
+            <li>Armo playlists por mood, género o energía</li>
+            <li>Busco y reproduzco en Spotify</li>
+            <li>Recuerdo la conversación y lo que te gusta</li>
+            <li>Controlas la reproducción desde la barra de abajo</li>
+          </ul>
+          <p class="welcome-hint">Escribe abajo o usa un atajo del panel izquierdo</p>
+        </div>
+      </div>
+
+      <div class="composer">
+        <form id="chat-form" class="composer-form">
+          <input
+            type="text"
+            id="chat-input"
+            placeholder="Pide una playlist, busca una canción o dime cómo te sientes…"
+            autocomplete="off"
+          />
+          <button type="submit" id="send-btn" class="send-btn" aria-label="Enviar">➤</button>
+        </form>
+      </div>
+    </main>
+
+    <!-- ─── Now Playing ─── -->
+    <div id="player" class="player is-idle">
+      <div class="player-left">
+        <div id="np-cover" class="np-cover np-cover-empty">🎵</div>
+        <div class="np-meta">
+          <span id="np-title" class="np-title">Nada sonando</span>
+          <span id="np-artist" class="np-artist">Abre Spotify y pídeme que ponga algo</span>
+        </div>
+      </div>
+
+      <div class="player-center">
+        <div class="np-controls">
+          <button id="np-prev" class="np-btn" title="Anterior" aria-label="Anterior">⏮</button>
+          <button id="np-playpause" class="np-btn np-play" title="Play / Pausa" aria-label="Play o pausa">▶</button>
+          <button id="np-next" class="np-btn" title="Siguiente" aria-label="Siguiente">⏭</button>
+        </div>
+        <div class="np-progress">
+          <span id="np-cur" class="np-time">0:00</span>
+          <div id="np-bar" class="np-bar" role="slider" aria-label="Progreso" tabindex="0">
+            <div id="np-fill" class="np-fill"></div>
+          </div>
+          <span id="np-dur" class="np-time">0:00</span>
+        </div>
+      </div>
+
+      <div class="player-right">
+        <span id="np-device" class="np-device"></span>
+        <span class="np-vol-icon">🔊</span>
+        <input id="np-volume" class="np-volume" type="range" min="0" max="100" value="60" aria-label="Volumen" />
+      </div>
+    </div>
+
+    <div id="toast" class="toast hidden"></div>
+  </div>
+</Layout>
+
+<style is:global>
+  :root {
+    --bg-0: #0a0a0f;
+    --bg-1: #12121c;
+    --bg-2: #171722;
+    --panel: #16161f;
+    --border: #26263340;
+    --border-solid: #262633;
+    --text: #e8e8f0;
+    --muted: #8b8ba3;
+    --pink: #ff2d78;
+    --orange: #ff6b35;
+    --green: #1ed760;
+    --blue: #6ea8ff;
+  }
+
+  /* ─── Layout grid ─── */
+  .page {
+    display: grid;
+    grid-template-columns: 288px 1fr;
+    grid-template-rows: 1fr auto;
+    grid-template-areas:
+      "sidebar main"
+      "player player";
+    height: 100vh;
+    overflow: hidden;
+    background:
+      radial-gradient(1200px 600px at 80% -10%, #ff2d7815, transparent),
+      radial-gradient(900px 500px at 0% 110%, #6a2dff12, transparent),
+      var(--bg-0);
+  }
+
+  /* ─── Sidebar ─── */
+  .sidebar {
+    grid-area: sidebar;
+    background: linear-gradient(180deg, var(--bg-1), var(--bg-0));
+    border-right: 1px solid var(--border);
+    padding: 1.1rem 0.9rem;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    padding: 0.2rem 0.3rem 0.5rem;
+  }
+  .brand-logo {
+    font-size: 2rem;
+    filter: drop-shadow(0 0 10px #ff2d7860);
+  }
+  .brand-name {
+    font-size: 1.25rem;
+    margin: 0;
+    line-height: 1.1;
+  }
+  .brand-sub {
+    font-size: 0.7rem;
+    color: var(--muted);
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border-solid);
+    border-radius: 12px;
+    padding: 0.8rem;
+  }
+  .panel-title {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--muted);
+    margin-bottom: 0.6rem;
+    font-weight: 600;
+  }
+
+  .status-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.78rem;
+    color: var(--text);
+    margin: 0.32rem 0;
+  }
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .dot-on { background: var(--green); box-shadow: 0 0 8px var(--green); }
+  .dot-lib { background: var(--blue); }
+  .dot-idle { background: var(--muted); }
+  .dot-live { background: var(--green); box-shadow: 0 0 8px var(--green); animation: pulse 1.6s infinite; }
+  .dot-off { background: #ff4d4d; }
+
+  .connect-btn {
+    display: block;
+    margin-top: 0.5rem;
+    text-align: center;
+    text-decoration: none;
+    font-size: 0.76rem;
+    color: #fff;
+    background: linear-gradient(135deg, #1ed760, #17b74e);
+    border-radius: 8px;
+    padding: 0.5rem 0.7rem;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .connect-btn:hover { transform: translateY(-1px); box-shadow: 0 0 14px #1ed76050; }
+  .connect-btn.hidden { display: none; }
+
+  .stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+    margin-bottom: 0.6rem;
+  }
+  .stat-card {
+    background: var(--bg-2);
+    border: 1px solid var(--border-solid);
+    border-radius: 10px;
+    padding: 0.6rem;
+    text-align: center;
+  }
+  .stat-value {
+    display: block;
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: var(--pink);
+  }
+  .stat-label {
+    font-size: 0.62rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  .expander { margin-top: 0.4rem; }
+  .expander summary {
+    cursor: pointer;
+    font-size: 0.76rem;
+    color: var(--text);
+    padding: 0.4rem 0.2rem;
+    list-style: none;
+  }
+  .expander summary::-webkit-details-marker { display: none; }
+  .expander summary::before { content: "▸ "; color: var(--pink); }
+  .expander[open] summary::before { content: "▾ "; }
+  .expander-body { padding: 0.3rem 0.1rem; display: flex; flex-direction: column; gap: 0.35rem; }
+
+  .bar-line {
+    display: grid;
+    grid-template-columns: 70px 1fr 20px;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.68rem;
+    color: var(--muted);
+  }
+  .bar-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bar-track { height: 5px; background: var(--bg-2); border-radius: 3px; overflow: hidden; }
+  .bar-fill { display: block; height: 100%; background: linear-gradient(90deg, var(--pink), var(--orange)); }
+  .bar-count { text-align: right; }
+
+  .quick-prompts { display: flex; flex-direction: column; gap: 0.4rem; }
+  .quick-btn {
+    background: var(--bg-2);
+    border: 1px solid var(--border-solid);
+    border-radius: 9px;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.76rem;
+    padding: 0.55rem 0.7rem;
+    cursor: pointer;
+    text-align: left;
+    transition: all 0.15s ease;
+  }
+  .quick-btn:hover {
+    border-color: var(--pink);
+    background: #ff2d7812;
+    transform: translateX(3px);
+  }
+
+  .clear-btn {
+    background: transparent;
+    border: 1px solid var(--border-solid);
+    border-radius: 9px;
+    color: var(--muted);
+    font-family: inherit;
+    font-size: 0.78rem;
+    padding: 0.55rem;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .clear-btn:hover { border-color: var(--pink); color: var(--pink); }
+
+  .sidebar-footer {
+    text-align: center;
+    color: #3a3a4a;
+    font-size: 0.62rem;
+    margin-top: auto;
+    padding-top: 0.5rem;
+  }
+
+  /* ─── Main ─── */
+  .main {
+    grid-area: main;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-width: 0;
+  }
+  .topbar {
+    padding: 1.1rem 2rem 0.7rem;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .title {
+    font-size: 1.6rem;
+    margin: 0;
+    line-height: 1.1;
+  }
+  .title-sub {
+    font-size: 0.78rem;
+    color: var(--muted);
+    margin-top: 0.15rem;
+  }
+
+  .chat {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1.4rem 2rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.1rem;
+  }
+
+  .welcome {
+    margin: auto;
+    max-width: 460px;
+    text-align: center;
+    background: linear-gradient(160deg, var(--bg-1), var(--bg-2));
+    border: 1px solid var(--border-solid);
+    border-radius: 18px;
+    padding: 2.2rem 2rem;
+    animation: fadeIn 0.4s ease;
+  }
+  .welcome-emoji { font-size: 3rem; }
+  .welcome h3 { margin: 0.8rem 0 1rem; font-size: 1.3rem; }
+  .welcome-list {
+    list-style: none;
+    text-align: left;
+    display: inline-flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+  .welcome-list li::before { content: "→ "; color: var(--pink); }
+  .welcome-hint { color: #4a4a5a; font-size: 0.75rem; margin-top: 1.3rem; }
+
+  /* ─── Memoria (corto y largo plazo) ─── */
+  .dot-cloud { background: var(--orange); box-shadow: 0 0 8px var(--orange); }
+  .mem-row { display: flex; flex-direction: column; gap: 0.1rem; margin-bottom: 0.55rem; }
+  .mem-kind { font-size: 0.62rem; letter-spacing: 1px; text-transform: uppercase; color: var(--pink); }
+  .mem-value { font-size: 0.74rem; color: var(--text); }
+  .mem-value code { font-size: 0.7rem; padding: 1px 5px; }
+  .mem-list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin: 0.2rem 0 0.7rem;
+    max-height: 170px;
+    overflow-y: auto;
+  }
+  .mem-list li {
+    font-size: 0.7rem;
+    line-height: 1.45;
+    color: var(--muted);
+    background: var(--bg-2);
+    border: 1px solid var(--border-solid);
+    border-left: 2px solid var(--blue);
+    border-radius: 6px;
+    padding: 0.35rem 0.5rem;
+    animation: fadeIn 0.3s ease;
+  }
+  .mem-list li.mem-new { border-left-color: var(--green); color: var(--text); }
+  .mem-list .mem-empty { border-left-color: var(--border-solid); font-style: italic; }
+  #new-session { width: 100%; }
+
+  /* ─── Razonamiento de Nova (<thinking>) ─── */
+  .thought {
+    font-size: 0.72rem;
+    line-height: 1.5;
+    color: var(--muted);
+    font-style: italic;
+    border-left: 2px solid #6a2dff60;
+    padding: 0.15rem 0 0.15rem 0.6rem;
+    margin: 0.1rem 0 0.2rem;
+    white-space: pre-wrap;
+    animation: fadeIn 0.2s ease;
+  }
+  .thought::before { content: "💭 "; font-style: normal; }
+  .activity-chip.memory.pending { border-color: #6ea8ff60; }
+  .activity-chip.guard { border-color: #ffcc0060; }
+
+  /* ─── Composer ─── */
+  .composer { padding: 0.8rem 2rem 1.3rem; flex-shrink: 0; }
+  .composer-form {
+    display: flex;
+    gap: 0.5rem;
+    background: var(--bg-1);
+    border: 1px solid var(--border-solid);
+    border-radius: 14px;
+    padding: 0.45rem 0.45rem 0.45rem 0.9rem;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  .composer-form:focus-within {
+    border-color: var(--pink);
+    box-shadow: 0 0 0 3px #ff2d7818;
+  }
+  #chat-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.9rem;
+  }
+  #chat-input::placeholder { color: var(--muted); }
+  .send-btn {
+    background: linear-gradient(135deg, var(--pink), var(--orange));
+    border: none;
+    border-radius: 10px;
+    color: white;
+    width: 42px;
+    height: 42px;
+    cursor: pointer;
+    font-size: 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    flex-shrink: 0;
+  }
+  .send-btn:hover { transform: scale(1.06); box-shadow: 0 0 18px #ff2d7850; }
+  .send-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
+
+  /* ─── Chat messages ─── */
+  .msg {
+    display: flex;
+    gap: 0.7rem;
+    align-items: flex-start;
+    max-width: 82%;
+    animation: fadeIn 0.25s ease;
+  }
+  .msg.user { align-self: flex-end; flex-direction: row-reverse; }
+  .msg.assistant { align-self: flex-start; }
+  .msg-avatar {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.05rem;
+    flex-shrink: 0;
+    border: 1px solid var(--border-solid);
+  }
+  .msg.user .msg-avatar { background: #ff2d7818; }
+  .msg.assistant .msg-avatar { background: #1ed76015; }
+
+  .bubble {
+    border-radius: 14px;
+    padding: 0.8rem 1rem;
+    background: var(--bg-1);
+    border: 1px solid var(--border-solid);
+    min-width: 0;
+  }
+  .msg.user .bubble { background: #21121c; border-color: #ff2d7830; }
+
+  .bubble-text {
+    font-size: 0.88rem;
+    line-height: 1.65;
+    color: var(--text);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .bubble-text a { color: var(--blue); text-decoration: underline; }
+  .bubble-text a:hover { color: #9cc4ff; }
+
+  /* ─── Activity feed (real-time) ─── */
+  .activity {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin-bottom: 0.6rem;
+  }
+  .activity-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.75rem;
+    color: var(--text);
+    background: var(--bg-2);
+    border: 1px solid var(--border-solid);
+    border-radius: 999px;
+    padding: 0.28rem 0.7rem;
+    width: fit-content;
+    animation: fadeIn 0.2s ease;
+  }
+  .activity-chip.pending { border-color: #ff2d7840; }
+  .activity-chip.done { color: var(--muted); }
+  .activity-chip .spinner {
+    width: 11px;
+    height: 11px;
+    border: 2px solid #ffffff25;
+    border-top-color: var(--pink);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  .activity-chip .check { color: var(--green); }
+
+  .typing {
+    display: inline-flex;
+    gap: 3px;
+    align-items: center;
+    height: 14px;
+  }
+  .typing span {
+    width: 5px; height: 5px; border-radius: 50%;
+    background: var(--pink);
+    animation: bounce 1s infinite;
+  }
+  .typing span:nth-child(2) { animation-delay: 0.15s; }
+  .typing span:nth-child(3) { animation-delay: 0.3s; }
+
+  /* ─── Playlist card ─── */
+  .pl-card {
+    margin-top: 0.8rem;
+    background: linear-gradient(150deg, #14141f, #1c1330);
+    border: 1px solid #ff2d7833;
+    border-radius: 14px;
+    padding: 0.9rem;
+    max-width: 460px;
+  }
+  .pl-loading { font-size: 0.78rem; color: var(--muted); margin-top: 0.6rem; }
+  .pl-head { display: flex; gap: 0.9rem; align-items: center; }
+  .pl-cover {
+    width: 88px; height: 88px;
+    border-radius: 10px;
+    object-fit: cover;
+    flex-shrink: 0;
+    box-shadow: 0 4px 18px #00000060;
+  }
+  .pl-cover-empty {
+    display: flex; align-items: center; justify-content: center;
+    background: var(--bg-2); font-size: 1.6rem;
+  }
+  .pl-info { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+  .pl-badge { font-size: 0.6rem; letter-spacing: 1.2px; color: var(--muted); text-transform: uppercase; }
+  .pl-name { font-size: 1.05rem; font-weight: 700; color: var(--text); text-decoration: none; }
+  .pl-name:hover { color: var(--pink); }
+  .pl-desc {
+    font-size: 0.72rem; color: var(--muted);
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .pl-open {
+    font-size: 0.72rem; color: var(--green); text-decoration: none;
+    margin-top: 0.25rem; width: fit-content;
+  }
+  .pl-open:hover { text-shadow: 0 0 8px #1ed76060; }
+
+  .pl-tracks { list-style: none; margin: 0.8rem 0 0; padding: 0; display: flex; flex-direction: column; }
+  .pl-track {
+    display: flex; align-items: center; gap: 0.6rem;
+    padding: 0.38rem 0.4rem;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.12s ease;
+  }
+  .pl-track:hover { background: #ff2d7815; }
+  .pl-track-cover {
+    width: 34px; height: 34px; border-radius: 5px; object-fit: cover; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center; background: var(--bg-2); font-size: 0.85rem;
+  }
+  .pl-track-info { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+  .pl-track-title { font-size: 0.78rem; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pl-track-artist { font-size: 0.68rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pl-track-dur { font-size: 0.68rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .pl-track-play { font-size: 0.7rem; color: var(--pink); opacity: 0; width: 12px; }
+  .pl-track:hover .pl-track-play { opacity: 1; }
+  .pl-tracks--scroll { max-height: 320px; overflow-y: auto; }
+  .pl-more {
+    display: block;
+    width: 100%;
+    margin-top: 0.5rem;
+    padding: 0.45rem;
+    font-family: inherit;
+    font-size: 0.72rem;
+    color: var(--muted);
+    text-align: center;
+    background: none;
+    border: 1px solid var(--border-solid);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease;
+  }
+  .pl-more:hover { color: var(--pink); border-color: var(--pink); }
+
+  /* ─── Now Playing bar ─── */
+  .player {
+    grid-area: player;
+    display: grid;
+    grid-template-columns: minmax(200px, 1fr) minmax(300px, 1.8fr) minmax(160px, 1fr);
+    align-items: center;
+    gap: 1.2rem;
+    padding: 0.7rem 1.5rem;
+    background: linear-gradient(180deg, var(--bg-2), var(--bg-0));
+    border-top: 1px solid #ff2d7830;
+    box-shadow: 0 -8px 30px #00000070;
+  }
+  .player.is-idle { opacity: 0.85; }
+  .player.is-idle .np-controls, .player.is-idle .np-progress { opacity: 0.55; }
+
+  .player-left { display: flex; align-items: center; gap: 0.75rem; min-width: 0; }
+  .np-cover {
+    width: 54px; height: 54px; border-radius: 9px; object-fit: cover;
+    flex-shrink: 0; background: var(--bg-2);
+    box-shadow: 0 2px 12px #00000060;
+  }
+  .np-cover-empty { display: flex; align-items: center; justify-content: center; font-size: 1.3rem; }
+  .np-meta { display: flex; flex-direction: column; min-width: 0; }
+  .np-title { font-size: 0.86rem; color: var(--text); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .np-artist { font-size: 0.74rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .player-center { display: flex; flex-direction: column; align-items: center; gap: 0.45rem; }
+  .np-controls { display: flex; align-items: center; gap: 1.1rem; }
+  .np-btn {
+    background: transparent; border: none; color: var(--muted);
+    font-size: 1rem; cursor: pointer; padding: 0.2rem; line-height: 1;
+    transition: color 0.15s ease, transform 0.12s ease;
+  }
+  .np-btn:hover { color: var(--text); transform: scale(1.15); }
+  .np-play {
+    width: 40px; height: 40px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--pink), var(--orange));
+    color: white; font-size: 1rem;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .np-play:hover { color: white; box-shadow: 0 0 16px #ff2d7860; }
+
+  .np-progress { display: flex; align-items: center; gap: 0.6rem; width: 100%; max-width: 540px; }
+  .np-time { font-size: 0.68rem; color: var(--muted); min-width: 34px; text-align: center; font-variant-numeric: tabular-nums; }
+  .np-bar { flex: 1; height: 6px; background: var(--border-solid); border-radius: 3px; cursor: pointer; overflow: hidden; }
+  .np-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--pink), var(--orange)); transition: width 0.4s linear; }
+  .np-bar:hover .np-fill { background: linear-gradient(90deg, var(--pink), #ffcc00); }
+
+  .player-right { display: flex; align-items: center; justify-content: flex-end; gap: 0.5rem; min-width: 0; }
+  .np-device { font-size: 0.68rem; color: var(--green); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 110px; }
+  .np-vol-icon { font-size: 0.85rem; }
+  .np-volume { width: 90px; accent-color: var(--pink); cursor: pointer; }
+
+  /* ─── Toast ─── */
+  .toast {
+    position: fixed;
+    bottom: 96px; left: 50%; transform: translateX(-50%);
+    background: var(--bg-2); border: 1px solid var(--pink); color: var(--text);
+    padding: 0.6rem 1.2rem; border-radius: 10px; font-size: 0.8rem;
+    box-shadow: 0 0 24px #ff2d7840; z-index: 60; max-width: 80vw; text-align: center;
+    animation: fadeIn 0.2s ease;
+  }
+  .toast.hidden { display: none; }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes bounce { 0%, 100% { transform: translateY(0); opacity: 0.5; } 50% { transform: translateY(-4px); opacity: 1; } }
+
+  @media (max-width: 860px) {
+    .page { grid-template-columns: 1fr; grid-template-areas: "main" "player"; }
+    .sidebar { display: none; }
+    .player-right { display: none; }
+    .player { grid-template-columns: 1fr 1.6fr; }
+  }
+</style>
+
+<script>
+  // ─────────────────────────────────────────────────────────────────────────
+  //  Chat con streaming en tiempo real
+  // ─────────────────────────────────────────────────────────────────────────
+
+  const chat = document.getElementById("chat")!;
+  const form = document.getElementById("chat-form") as HTMLFormElement;
+  const input = document.getElementById("chat-input") as HTMLInputElement;
+  const sendBtn = document.getElementById("send-btn") as HTMLButtonElement;
+  const welcome = document.getElementById("welcome");
+  const quickBtns = document.querySelectorAll(".quick-btn");
+
+  const scrollDown = () => (chat.scrollTop = chat.scrollHeight);
+  const hideWelcome = () => welcome && (welcome.style.display = "none");
+
+  function escapeHtml(s: string): string {
+    return s.replace(/[&<>"']/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] ?? c),
+    );
+  }
+  function linkify(text: string): string {
+    let safe = escapeHtml(text);
+    safe = safe.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    safe = safe.replace(/(^|[^"=>])(https?:\/\/[^\s<]+)/g, '$1<a href="$2" target="_blank" rel="noopener">$2</a>');
+    return safe;
+  }
+
+  // Etiquetas amigables por herramienta
+  const TOOL_LABELS: Record<string, string> = {
+    buscar_en_spotify: "🔍 Buscando en Spotify",
+    crear_playlist_en_spotify: "🎶 Creando la playlist",
+    reproducir_cancion: "▶️ Poniendo la canción",
+    mis_top_artistas: "📊 Revisando tus artistas top",
+    mis_top_canciones: "📊 Revisando tus canciones top",
+    buscar_canciones: "📚 Buscando en tu biblioteca",
+    search_memory: "🧠 Buscando en tu memoria",
+  };
+  const toolLabel = (name: string) => TOOL_LABELS[name] ?? `⚙️ ${name}`;
+
+  function addUserMessage(text: string) {
+    const el = document.createElement("div");
+    el.className = "msg user";
+    el.innerHTML = `<span class="msg-avatar">🧑</span><div class="bubble"><div class="bubble-text"></div></div>`;
+    el.querySelector(".bubble-text")!.textContent = text;
+    chat.appendChild(el);
+    scrollDown();
+  }
+
+  // Devuelve handles para actualizar el mensaje del asistente en vivo.
+  function addAssistantMessage() {
+    const el = document.createElement("div");
+    el.className = "msg assistant";
+    el.innerHTML = `
+      <span class="msg-avatar">🤖</span>
+      <div class="bubble">
+        <div class="activity"></div>
+        <div class="bubble-text"><span class="typing"><span></span><span></span><span></span></span></div>
+      </div>`;
+    chat.appendChild(el);
+    scrollDown();
+
+    const activity = el.querySelector(".activity") as HTMLElement;
+    const textEl = el.querySelector(".bubble-text") as HTMLElement;
+    const bubble = el.querySelector(".bubble") as HTMLElement;
+    let started = false;
+    let thought: HTMLElement | null = null; // bloque 💭 que se está escribiendo
+
+    const closePending = () =>
+      activity.querySelectorAll(".activity-chip.pending").forEach((c) => {
+        c.classList.remove("pending");
+        c.classList.add("done");
+        const sp = c.querySelector(".spinner");
+        if (sp) sp.outerHTML = '<span class="check">✓</span>';
+      });
+
+    return {
+      onTool(name: string) {
+        closePending();
+        thought = null;
+        const chip = document.createElement("div");
+        chip.className = `activity-chip pending${name === "search_memory" ? " memory" : ""}`;
+        chip.innerHTML = `<span class="spinner"></span><span>${escapeHtml(toolLabel(name))}</span>`;
+        activity.appendChild(chip);
+        scrollDown();
+      },
+      onThinking(delta: string) {
+        if (!thought) {
+          if (!delta.trim()) return;
+          thought = document.createElement("div");
+          thought.className = "thought";
+          activity.appendChild(thought);
+        }
+        thought.textContent = (thought.textContent ?? "") + delta;
+        scrollDown();
+      },
+      onGuard() {
+        // La guardia detectó una acción narrada pero no ejecutada: borramos ese texto.
+        closePending();
+        thought = null;
+        started = false;
+        textEl.innerHTML = '<span class="typing"><span></span><span></span><span></span></span>';
+        const chip = document.createElement("div");
+        chip.className = "activity-chip pending guard";
+        chip.innerHTML = `<span class="spinner"></span><span>🛡️ Verificando: la playlist no se había creado</span>`;
+        activity.appendChild(chip);
+        scrollDown();
+      },
+      onText(full: string) {
+        if (!full.trim()) return;
+        thought = null;
+        if (!started) {
+          started = true;
+          textEl.textContent = "";
+        }
+        textEl.textContent = full.trim();
+        scrollDown();
+      },
+      finish(full: string) {
+        closePending();
+        textEl.innerHTML = linkify(full.trim());
+        const id = extractPlaylistId(full);
+        if (id) {
+          const host = document.createElement("div");
+          bubble.appendChild(host);
+          renderPlaylistCard(id, host);
+        }
+        scrollDown();
+      },
+      error(msg: string) {
+        closePending();
+        textEl.textContent = "⚠️ " + msg;
+      },
+    };
+  }
+
+  // Pinta un mensaje ya terminado (para el historial de la sesión).
+  function addPastAssistantMessage(text: string) {
+    addAssistantMessage().finish(text);
+  }
+
+  async function sendMessage(text: string) {
+    if (!text.trim()) return;
+    hideWelcome();
+    addUserMessage(text);
+    const ui = addAssistantMessage();
+
+    input.disabled = true;
+    sendBtn.disabled = true;
+
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: text }),
+      });
+      if (!res.ok && res.headers.get("content-type")?.includes("application/json")) {
+        throw new Error((await res.json()).error ?? `HTTP ${res.status}`);
+      }
+      if (!res.body) throw new Error("Sin stream de respuesta");
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      let full = "";
+      let finished = false;
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const parts = buf.split("\n\n");
+        buf = parts.pop() ?? "";
+        for (const part of parts) {
+          const line = part.trim();
+          if (!line.startsWith("data:")) continue;
+          const evt = JSON.parse(line.slice(5).trim());
+          if (evt.type === "tool") {
+            ui.onTool(evt.name);
+          } else if (evt.type === "thinking") {
+            ui.onThinking(evt.delta);
+          } else if (evt.type === "guard") {
+            full = "";
+            ui.onGuard();
+          } else if (evt.type === "text") {
+            full += evt.delta;
+            ui.onText(full);
+          } else if (evt.type === "done") {
+            ui.finish(full || "Sin respuesta del agente.");
+            finished = true;
+            schedulePlaybackRefresh();
+            updateSpotifyStatus(); // reverifica: si el token murió, muestra "Conectar"
+          } else if (evt.type === "error") {
+            ui.error(evt.error);
+            finished = true;
+            updateSpotifyStatus();
+          }
+        }
+      }
+      if (!finished) ui.finish(full || "Sin respuesta.");
+    } catch (err) {
+      ui.error(err instanceof Error && err.message ? err.message : "Error de conexión con el agente. ¿El servidor está corriendo?");
+    }
+
+    input.disabled = false;
+    sendBtn.disabled = false;
+    input.focus();
+    scrollDown();
+    refreshMemorySoon();
+  }
+
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const text = input.value.trim();
+    if (text) {
+      input.value = "";
+      sendMessage(text);
+    }
+  });
+  quickBtns.forEach((btn) =>
+    btn.addEventListener("click", () => {
+      const p = (btn as HTMLElement).dataset.prompt;
+      if (p && !input.disabled) sendMessage(p);
+    }),
+  );
+
+  // ─── Memoria: corto plazo (sesión) y largo plazo (.agent/memory) ──────────
+
+  interface Memoria {
+    sesion: string;
+    historial: { role: "user" | "assistant"; text: string }[];
+    recuerdos: { archivo: string; texto: string }[];
+  }
+
+  const memSesion = document.getElementById("mem-sesion")!;
+  const memTurnos = document.getElementById("mem-turnos")!;
+  const memTotal = document.getElementById("mem-total")!;
+  const memList = document.getElementById("mem-list")!;
+  const newSessionBtn = document.getElementById("new-session") as HTMLButtonElement;
+  let knownMemories = new Set<string>();
+
+  function renderMemory(m: Memoria) {
+    memSesion.textContent = m.sesion;
+    memTurnos.textContent = String(m.historial.length);
+    memTotal.textContent = String(m.recuerdos.length);
+    if (m.recuerdos.length === 0) {
+      memList.innerHTML = `<li class="mem-empty">Todavía no hay recuerdos. Cuéntale al DJ qué te gusta.</li>`;
+    } else {
+      const firstLoad = knownMemories.size === 0;
+      memList.innerHTML = m.recuerdos
+        .map((r) => `<li class="${!firstLoad && !knownMemories.has(r.archivo) ? "mem-new" : ""}" title="${escapeHtml(r.archivo)}">${escapeHtml(r.texto)}</li>`)
+        .join("");
+      knownMemories = new Set(m.recuerdos.map((r) => r.archivo));
+    }
+  }
+
+  async function loadMemory(): Promise<Memoria | null> {
+    try {
+      const m: Memoria = await (await fetch("/api/memoria")).json();
+      renderMemory(m);
+      return m;
+    } catch {
+      return null;
+    }
+  }
+
+  // La extracción de recuerdos corre en segundo plano cada pocos turnos:
+  // revisamos un par de veces después de cada respuesta.
+  function refreshMemorySoon() {
+    [500, 5000, 15000].forEach((ms) => window.setTimeout(loadMemory, ms));
+  }
+
+  // Al abrir la página, mostramos la conversación guardada en la sesión.
+  loadMemory().then((m) => {
+    if (!m?.historial.length) return;
+    hideWelcome();
+    for (const msg of m.historial) {
+      if (msg.role === "user") addUserMessage(msg.text);
+      else addPastAssistantMessage(msg.text);
+    }
+  });
+
+  newSessionBtn.addEventListener("click", async () => {
+    if (input.disabled) return;
+    newSessionBtn.disabled = true;
+    try {
+      const { sesion } = await (await fetch("/api/memoria", { method: "POST" })).json();
+      chat.innerHTML = "";
+      if (welcome) {
+        chat.appendChild(welcome);
+        welcome.style.display = "";
+      }
+      showToast(`✨ Sesión nueva: ${sesion}. La memoria de largo plazo sigue ahí.`);
+      await loadMemory();
+    } finally {
+      newSessionBtn.disabled = false;
+    }
+  });
+
+  // ─── Playlist card ─────────────────────────────────────────────────────────
+
+  function extractPlaylistId(text: string): string | null {
+    const m = text.match(/open\.spotify\.com\/playlist\/([a-zA-Z0-9]+)/);
+    return m ? m[1] : null;
+  }
+
+  interface PlTrack { title: string; artist: string; cover: string | null; uri: string; durationMs: number; }
+  interface PlCard { name: string; description: string; cover: string | null; url: string; total: number; tracks: PlTrack[]; error?: string; }
+
+  async function renderPlaylistCard(id: string, host: HTMLElement) {
+    host.innerHTML = `<div class="pl-loading">🎨 Cargando la playlist…</div>`;
+    try {
+      const res = await fetch(`/api/playlist?id=${encodeURIComponent(id)}`);
+      const data: PlCard = await res.json();
+      if (data.error || !data.name) {
+        host.innerHTML = "";
+        return;
+      }
+      const cover = data.cover
+        ? `<img class="pl-cover" src="${data.cover}" alt="cover" />`
+        : `<div class="pl-cover pl-cover-empty">🎵</div>`;
+
+      const trackRow = (t: PlTrack) => `
+        <li class="pl-track" data-uri="${t.uri}" title="Reproducir">
+          ${t.cover ? `<img class="pl-track-cover" src="${t.cover}" alt="" />` : `<span class="pl-track-cover pl-cover-empty">🎵</span>`}
+          <span class="pl-track-info">
+            <span class="pl-track-title">${escapeHtml(t.title)}</span>
+            <span class="pl-track-artist">${escapeHtml(t.artist)}</span>
+          </span>
+          <span class="pl-track-dur">${fmtTime(t.durationMs)}</span>
+          <span class="pl-track-play">▶</span>
+        </li>`;
+
+      const INITIAL = 8;
+      const hasMore = data.tracks.length > INITIAL;
+      const moreLabel = `+ ${data.total - INITIAL} tracks más`;
+
+      host.innerHTML = `
+        <div class="pl-card">
+          <div class="pl-head">
+            ${cover}
+            <div class="pl-info">
+              <span class="pl-badge">Playlist · ${data.total} tracks</span>
+              <a class="pl-name" href="${data.url}" target="_blank" rel="noopener">${escapeHtml(data.name)}</a>
+              ${data.description ? `<span class="pl-desc">${escapeHtml(data.description)}</span>` : ""}
+              <a class="pl-open" href="${data.url}" target="_blank" rel="noopener">▶ Abrir en Spotify</a>
+            </div>
+          </div>
+          <ul class="pl-tracks">${data.tracks.slice(0, INITIAL).map(trackRow).join("")}</ul>
+          ${hasMore ? `<button class="pl-more" data-expanded="false">${moreLabel}</button>` : ""}
+        </div>`;
+
+      const ul = host.querySelector(".pl-tracks") as HTMLElement;
+
+      // Reproducir al hacer clic (delegación → funciona con filas agregadas luego).
+      ul.addEventListener("click", (e) => {
+        const row = (e.target as HTMLElement).closest(".pl-track") as HTMLElement | null;
+        if (row?.dataset.uri) playTrack(row.dataset.uri);
+      });
+
+      // Ver más / ver menos.
+      const btn = host.querySelector(".pl-more") as HTMLButtonElement | null;
+      btn?.addEventListener("click", () => {
+        const expanded = btn.dataset.expanded === "true";
+        if (expanded) {
+          ul.innerHTML = data.tracks.slice(0, INITIAL).map(trackRow).join("");
+          ul.classList.remove("pl-tracks--scroll");
+          btn.textContent = moreLabel;
+          btn.dataset.expanded = "false";
+        } else {
+          ul.innerHTML = data.tracks.map(trackRow).join("");
+          ul.classList.add("pl-tracks--scroll");
+          btn.textContent =
+            data.tracks.length < data.total
+              ? `Mostrando ${data.tracks.length} de ${data.total} · ver menos`
+              : "Ver menos";
+          btn.dataset.expanded = "true";
+        }
+      });
+    } catch {
+      host.innerHTML = "";
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  //  Reproductor (now playing)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  interface NowPlaying {
+    active: boolean;
+    isPlaying?: boolean; progressMs?: number; durationMs?: number;
+    title?: string; artist?: string; cover?: string | null;
+    deviceName?: string | null; volumePercent?: number | null;
+  }
+
+  const player = document.getElementById("player")!;
+  const npCover = document.getElementById("np-cover")!;
+  const npTitle = document.getElementById("np-title")!;
+  const npArtist = document.getElementById("np-artist")!;
+  const npPlayPause = document.getElementById("np-playpause")!;
+  const npPrev = document.getElementById("np-prev")!;
+  const npNext = document.getElementById("np-next")!;
+  const npBar = document.getElementById("np-bar")!;
+  const npFill = document.getElementById("np-fill")! as HTMLElement;
+  const npCur = document.getElementById("np-cur")!;
+  const npDur = document.getElementById("np-dur")!;
+  const npDevice = document.getElementById("np-device")!;
+  const npVolume = document.getElementById("np-volume") as HTMLInputElement;
+  const spotifyDot = document.getElementById("spotify-dot")!;
+  const spotifyLabel = document.getElementById("spotify-label")!;
+  const toast = document.getElementById("toast")!;
+
+  let state: NowPlaying = { active: false };
+  let lastFetch = 0;
+  let volumeTouched = 0;
+  let toastTimer: number | undefined;
+  // Estado optimista de play/pausa: al tocar el botón lo fijamos un ratito para
+  // que el poll no lo revierta mientras Spotify tarda en reflejar el cambio.
+  let optimisticPlaying: boolean | null = null;
+  let optimisticUntil = 0;
+
+  function showToast(msg: string) {
+    toast.textContent = msg;
+    toast.classList.remove("hidden");
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = window.setTimeout(() => toast.classList.add("hidden"), 3800);
+  }
+
+  function fmtTime(ms: number): string {
+    if (!ms || ms < 0) ms = 0;
+    const s = Math.floor(ms / 1000);
+    return `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, "0")}`;
+  }
+
+  function setCover(url: string | null) {
+    if (url) {
+      npCover.innerHTML = "";
+      (npCover as HTMLElement).style.backgroundImage = `url("${url}")`;
+      (npCover as HTMLElement).style.backgroundSize = "cover";
+      (npCover as HTMLElement).style.backgroundPosition = "center";
+      npCover.classList.remove("np-cover-empty");
+    } else {
+      (npCover as HTMLElement).style.backgroundImage = "";
+      npCover.classList.add("np-cover-empty");
+      npCover.textContent = "🎵";
+    }
+  }
+
+  function renderPlayer() {
+    if (!state.active) {
+      player.classList.add("is-idle");
+      npTitle.textContent = "Nada sonando";
+      npArtist.textContent = "Abre Spotify y pídeme que ponga algo";
+      npPlayPause.textContent = "▶";
+      npDevice.textContent = "";
+      setCover(null);
+      npFill.style.width = "0%";
+      npCur.textContent = "0:00";
+      npDur.textContent = "0:00";
+      return;
+    }
+    player.classList.remove("is-idle");
+    npTitle.textContent = state.title ?? "—";
+    npArtist.textContent = state.artist ?? "";
+    npDevice.textContent = state.deviceName ?? "";
+    setCover(state.cover ?? null);
+    npPlayPause.textContent = state.isPlaying ? "⏸" : "▶";
+    npDur.textContent = fmtTime(state.durationMs ?? 0);
+    if (state.volumePercent != null && Date.now() - volumeTouched > 3000) {
+      npVolume.value = String(state.volumePercent);
+    }
+    updateProgress();
+  }
+
+  function estProgress(): number {
+    if (!state.active) return 0;
+    const base = state.progressMs ?? 0;
+    if (!state.isPlaying) return base;
+    return Math.min(base + (Date.now() - lastFetch), state.durationMs ?? 0);
+  }
+  function updateProgress() {
+    const dur = state.durationMs ?? 0;
+    const prog = estProgress();
+    npFill.style.width = dur > 0 ? `${Math.min(100, (prog / dur) * 100)}%` : "0%";
+    npCur.textContent = fmtTime(prog);
+  }
+
+  let polling = false; // evita peticiones solapadas
+  async function pollPlayback() {
+    if (polling) return;
+    polling = true;
+    try {
+      const res = await fetch("/api/playback");
+      const data: NowPlaying = await res.json();
+      state = data;
+      lastFetch = Date.now();
+      // Respetamos el play/pausa optimista durante la ventana de gracia.
+      if (optimisticPlaying !== null && Date.now() < optimisticUntil && state.active) {
+        state.isPlaying = optimisticPlaying;
+      } else {
+        optimisticPlaying = null;
+      }
+      renderPlayer();
+    } catch {
+      /* silencioso — el estado de conexión lo maneja updateSpotifyStatus */
+    } finally {
+      polling = false;
+    }
+  }
+
+  // ─── Estado de conexión con Spotify (identidad, no reproducción) ─────────────
+  const spotifyConnect = document.getElementById("spotify-connect")!;
+
+  async function updateSpotifyStatus() {
+    try {
+      const res = await fetch("/api/spotify/status");
+      const s: { configured: boolean; user: string | null } = await res.json();
+      if (s.user) {
+        spotifyDot.className = "dot dot-live";
+        spotifyLabel.textContent = `Spotify · ${s.user}`;
+        spotifyConnect.classList.add("hidden");
+      } else if (s.configured) {
+        spotifyDot.className = "dot dot-idle";
+        spotifyLabel.textContent = "Spotify · sin conectar";
+        spotifyConnect.classList.remove("hidden");
+      } else {
+        spotifyDot.className = "dot dot-off";
+        spotifyLabel.textContent = "Spotify · falta configurar el .env";
+        spotifyConnect.classList.add("hidden");
+      }
+    } catch {
+      spotifyDot.className = "dot dot-off";
+      spotifyLabel.textContent = "Spotify · sin conexión";
+      spotifyConnect.classList.remove("hidden");
+    }
+  }
+
+  // Aviso al volver del OAuth y limpieza del query param.
+  (function handleOAuthReturn() {
+    const params = new URLSearchParams(location.search);
+    const st = params.get("spotify");
+    if (!st) return;
+    if (st === "connected") showToast("✅ Spotify conectado");
+    else if (st === "error") showToast(`⚠️ No se pudo conectar Spotify: ${params.get("reason") ?? "error"}`);
+    history.replaceState({}, "", location.pathname);
+  })();
+
+  // ─── Polling adaptativo ──────────────────────────────────────────────────
+  // Rápido cuando algo suena, lento cuando está idle, pausado si la pestaña
+  // no está visible. Así no golpeamos la API de Spotify sin necesidad.
+  let pollTimer: number | undefined;
+
+  function nextDelay(): number {
+    return state.active && state.isPlaying ? 5000 : 15000;
+  }
+
+  function scheduleNextPoll() {
+    if (pollTimer) clearTimeout(pollTimer);
+    if (document.hidden) return; // pausamos mientras la pestaña esté oculta
+    pollTimer = window.setTimeout(async () => {
+      await pollPlayback();
+      scheduleNextPoll();
+    }, nextDelay());
+  }
+
+  // Tras una acción o un mensaje, refrescamos pronto (Spotify tarda un instante).
+  function schedulePlaybackRefresh() {
+    window.setTimeout(async () => {
+      await pollPlayback();
+      scheduleNextPoll();
+    }, 700);
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      if (pollTimer) clearTimeout(pollTimer);
+    } else {
+      pollPlayback().then(scheduleNextPoll);
+    }
+  });
+
+  async function sendAction(action: string, extra: Record<string, unknown> = {}) {
+    try {
+      const res = await fetch("/api/playback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, ...extra }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        showToast(data.error);
+        updateSpotifyStatus(); // el error puede ser por token muerto → refrescar estado
+      }
+      schedulePlaybackRefresh();
+    } catch {
+      showToast("No pude contactar al reproductor.");
+    }
+  }
+
+  async function playTrack(uri: string) {
+    showToast("▶ Reproduciendo…");
+    await sendAction("playTrack", { uri });
+  }
+
+  npPlayPause.addEventListener("click", () => {
+    const action = state.isPlaying ? "pause" : "play";
+    // Marca optimista + ventana de gracia para que el poll no la pise.
+    state.isPlaying = !state.isPlaying;
+    optimisticPlaying = state.isPlaying;
+    optimisticUntil = Date.now() + 2500;
+    npPlayPause.textContent = state.isPlaying ? "⏸" : "▶";
+    sendAction(action);
+  });
+  npPrev.addEventListener("click", () => sendAction("previous"));
+  npNext.addEventListener("click", () => sendAction("next"));
+  npBar.addEventListener("click", (e) => {
+    if (!state.active || !state.durationMs) return;
+    const rect = npBar.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+    const positionMs = Math.floor(ratio * state.durationMs);
+    state.progressMs = positionMs;
+    lastFetch = Date.now();
+    updateProgress();
+    sendAction("seek", { positionMs });
+  });
+  npVolume.addEventListener("input", () => (volumeTouched = Date.now()));
+  npVolume.addEventListener("change", () => sendAction("volume", { volumePercent: Number(npVolume.value) }));
+
+  // Arranque: estado de conexión + un poll inicial y luego el loop adaptativo.
+  updateSpotifyStatus();
+  pollPlayback().then(scheduleNextPoll);
+  // Reverifica la conexión cada tanto (solo con la pestaña visible) para que el
+  // status refleje un token muerto y muestre el botón de reconectar.
+  setInterval(() => {
+    if (!document.hidden) updateSpotifyStatus();
+  }, 25000);
+  // Interpolación local del progreso (sin red), solo cuando algo suena y la
+  // pestaña está visible.
+  setInterval(() => {
+    if (!document.hidden && state.active && state.isPlaying) updateProgress();
+  }, 500);
+</script>

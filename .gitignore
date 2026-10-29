@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env
+.spotify_token.json
+# Sesiones y memoria del harness (datos personales del usuario)
+.agent/
+# Astro
+web/.astro/
+web/dist/
+.playwright-mcp/
+*.log
