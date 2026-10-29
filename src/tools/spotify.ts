@@ -186,7 +186,7 @@ Manda el título en 'nombre_cancion' y el artista por separado en 'artista'.`,
       try {
         const canciones = await sp.getTopTracks(10, (periodo ?? "medium_term") as TimeRange);
         return JSON.stringify(
-          canciones.map((t) => ({ titulo: t.name, artista: t.artists[0].name, uri: t.uri })),
+          canciones.map((t, i) => ({ posicion: i + 1, titulo: t.name, artista: t.artists[0]?.name, uri: t.uri })),
         );
       } catch (e) {
         return `Error: ${e}`;
